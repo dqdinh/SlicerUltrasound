@@ -9,7 +9,6 @@ import logging
 import random
 import numpy as np
 import os
-import pathlib
 from PIL import Image
 import pydicom
 import shutil
@@ -23,7 +22,7 @@ from DICOMLib import DICOMUtils
 import slicer
 from slicer.i18n import tr as _
 from slicer.i18n import translate
-from slicer.ScriptedLoadableModule import *
+from slicer.ScriptedLoadableModule import ScriptedLoadableModule, ScriptedLoadableModuleWidget, ScriptedLoadableModuleLogic, ScriptedLoadableModuleTest
 from slicer.util import VTKObservationMixin
 from slicer.parameterNodeWrapper import (
     parameterNodeWrapper,

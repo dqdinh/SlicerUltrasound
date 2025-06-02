@@ -52,3 +52,67 @@ This module facilitates the process of creating segmentations for time-series 2D
 1. Keyboard shortcuts facilitate the workflow: C saves current frame, S skips current frame without saving, D erases current segmentation, A shows/hides foreground volume.
 
 ![TimeSeriesAnnotation_2024-06-27.png](https://raw.githubusercontent.com/ungi/SlicerUltrasound/b4c3fdea3025d2891f849a9061a89ca8cbb30b99/Screenshots/TimeSeriesAnnotation_2024-06-27.png)
+
+## VS Code Development
+### Auto-completion and analysis settings
+To develop the Ultrasound extension, it is recommended to use Visual Studio Code with the Python extension. 
+The following settings are suggested for the `settings.json` file in the `.vscode` folder of your Slicer extension development workspace:
+```json
+{
+    "python.defaultInterpreterPath": "/Applications/Slicer.app/Contents/bin/PythonSlicer",
+    "python.terminal.activateEnvironment": false,
+    "python.autoComplete.extraPaths": [
+        "/Applications/Slicer.app/Contents/lib/Slicer-5.8/qt-scripted-modules",
+        "/Applications/Slicer.app/Contents/lib/Slicer-5.8/qt-loadable-modules",
+        "/Applications/Slicer.app/Contents/lib/Python/lib/python3.9/site-packages",
+    ],
+    "python.analysis.extraPaths": [
+        "/Applications/Slicer.app/Contents/lib/Slicer-5.8/qt-scripted-modules",
+        "/Applications/Slicer.app/Contents/lib/Slicer-5.8/qt-loadable-modules",
+        "/Applications/Slicer.app/Contents/lib/Python/lib/python3.9/site-packages",
+    ]
+}
+```
+This configuration allows you to use the Slicer Python interpreter and access the Slicer modules and libraries directly from VS Code.
+
+### Debugging
+Setup a `launch.json` file in the `.vscode` folder of your Slicer extension development workspace to enable debugging.
+The following configuration allows you to attach the debugger to a running Slicer instance:
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Remote Attach",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "port": 5678,
+                "host": "localhost"
+            },
+            "justMyCode": false,
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "${workspaceFolder}"
+                }
+            ]
+        }
+    ]
+}
+```
+
+Step to attach the debugger:
+1. Start Slicer App
+2. Open the Python Interactor in Slicer and run the following command to start the debug server:
+   ```python
+
+   import debugpy
+   debugpy.listen(("localhost", 5678))
+   print("Waiting for debugger attach...")
+   debugpy.wait_for_client()
+   debugpy.breakpoint()
+   ```
+3. In VS Code, open the Debug panel and select the "Python: Remote Attach" configuration.
+4. Click the green play button to start debugging.
+5. You can now set breakpoints in your Python code and debug the Ultrasound extension as it runs in Slicer.
