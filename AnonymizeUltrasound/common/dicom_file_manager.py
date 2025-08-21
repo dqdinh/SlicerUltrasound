@@ -16,6 +16,155 @@ import datetime
 import json
 from pydicom.dataset import FileMetaDataset
 
+class LocalDICOMNextPreloader(qt.QObject):
+    nodeReady = qt.Signal(int, object)  # emits index, vtkMRMLNode
+
+    def __init__(self, dicomDatabase=None, maxCache=3):
+        super().__init__()
+        self.db = dicomDatabase or slicer.dicomDatabase
+        self.maxCache = maxCache
+        self.worklist = []     # list of dicts with file paths or UIDs
+        self.currentIndex = -1
+        self.cache = {}        # index -> vtkMRMLNode
+
+    # ---------- Public API ----------
+    def setWorklist(self, items):
+        self.worklist = items or []
+        self.currentIndex = -1
+        self._clearCache()
+        # Prime: prefetch first two items
+        self.prefetch(0)
+        self.prefetch(1)
+
+    def onNextRequested(self):
+        target = self.currentIndex + 1
+        self._ensureLoaded(target)
+        node = self.cache.get(target)
+        if node:
+            self._show(node)
+        self.currentIndex = target
+        # Warm the one after next
+        self.prefetch(target + 1)
+        self._trimCache()
+
+    # ---------- Prefetch/Load ----------
+    def prefetch(self, index):
+        if not self._validIndex(index) or index in self.cache:
+            return
+        if self._presentLocally(index):
+            self._warmLoad(index)
+
+    def _ensureLoaded(self, index):
+        if not self._validIndex(index):
+            return
+        if index in self.cache:
+            return
+        if self._presentLocally(index):
+            self._warmLoad(index)
+        else:
+            print(f"Item {index} not present in DICOM DB; cannot load.")
+
+    # ---------- Presence checks ----------
+    def _presentLocally(self, index):
+        item = self.worklist[index]
+        # Check direct file path first
+        if 'inputPath' in item:
+            return os.path.isfile(item['inputPath'])
+        # Fallback to database checks
+        if 'instanceUID' in item:
+            return bool(self.db.fileForInstance(item['instanceUID']))
+        if 'seriesInstanceUID' in item:
+            return len(self.db.filesForSeries(item['seriesInstanceUID'])) > 0
+        return False
+
+    # ---------- Warm load (into MRML, hidden) ----------
+    def _warmLoad(self, index):
+        item = self.worklist[index]
+        node = None
+        try:
+            # Try direct file loading first
+            if 'inputPath' in item and os.path.isfile(item['inputPath']):
+                node = slicer.util.loadVolume(item['inputPath'], returnNode=True)[1]
+            elif 'instanceUID' in item:
+                f = self.db.fileForInstance(item['instanceUID'])
+                if f:
+                    node = slicer.util.loadVolume(f, returnNode=True)[1]
+            elif 'seriesInstanceUID' in item:
+                node = self._loadSeriesByUID(item['seriesInstanceUID'])
+        except Exception as e:
+            print(f"Warm-load failed for index {index}: {e}")
+            node = None
+
+        if node:
+            node.SetHideFromEditors(True)
+            dn = node.GetDisplayNode()
+            if dn:
+                dn.SetVisibility(False)
+            self.cache[index] = node
+            self.nodeReady.emit(index, node)
+
+    def _loadSeriesByUID(self, seriesUID):
+        try:
+            from DICOMLib import DICOMUtils
+            nodeIDs = DICOMUtils.loadSeriesByUID([seriesUID]) or []
+            nodes = [slicer.mrmlScene.GetNodeByID(nid) for nid in nodeIDs]
+            primary = self._selectPrimaryVolumeNode(nodes)
+            return primary or (nodes[0] if nodes else None)
+        except Exception:
+            files = self.db.filesForSeries(seriesUID)
+            return slicer.util.loadVolume(files[0], returnNode=True)[1] if files else None
+
+    def _selectPrimaryVolumeNode(self, nodes):
+        for className in ('vtkMRMLScalarVolumeNode', 'vtkMRMLVectorVolumeNode', 'vtkMRMLMultiVolumeNode'):
+            for n in nodes:
+                if n and n.IsA(className):
+                    return n
+        return None
+
+    # ---------- Helpers ----------
+    def _show(self, node):
+        slicer.util.setSliceViewerLayers(background=node)
+
+    def _trimCache(self):
+        keep = {self.currentIndex - 1, self.currentIndex, self.currentIndex + 1}
+        for idx in list(self.cache.keys()):
+            if idx not in keep:
+                n = self.cache.pop(idx)
+                slicer.mrmlScene.RemoveNode(n)
+
+    def _clearCache(self):
+        for n in self.cache.values():
+            slicer.mrmlScene.RemoveNode(n)
+        self.cache.clear()
+
+    def _validIndex(self, index):
+        return 0 <= index < len(self.worklist)
+
+
+def make_worklist_from_database(db=None, modalityFilter=None):
+    """
+    Returns a linear list of series to browse from the local DICOM database.
+    Each entry: {'patientID', 'studyInstanceUID', 'seriesInstanceUID'}
+    """
+    db = db or slicer.dicomDatabase
+    worklist = []
+    for patient in db.patients():
+        patientID = db.fieldForPatient("PatientID", patient)
+        for study in db.studiesForPatient(patient):
+            for series in db.seriesForStudy(study):
+                if modalityFilter:
+                    modality = db.fieldForSeries("Modality", series)
+                    if modality != modalityFilter:
+                        continue
+                # Only include series that have files
+                if len(db.filesForSeries(series)) > 0:
+                    worklist.append({
+                        'patientID': patientID,
+                        'studyInstanceUID': study,
+                        'seriesInstanceUID': series
+                    })
+    return worklist
+
 class DicomFileManager:
     """
     Shared DICOM file management functionality for ultrasound modules.
@@ -91,6 +240,44 @@ class DicomFileManager:
         self.next_dicom_index = 0
         self.current_dicom_index = 0
         self._temp_directories = []
+        # Add preloader instance
+        self.preloader = None
+        self._preloader_enabled = False
+
+    def enable_preloading(self, enabled: bool = True):
+        """Enable or disable DICOM preloading for improved performance."""
+        self._preloader_enabled = enabled
+        if enabled and self.dicom_df is not None:
+            self._setup_preloader()
+        elif not enabled and self.preloader:
+            self.preloader = None
+
+    def _setup_preloader(self):
+        """Setup the preloader with current DICOM dataframe."""
+        if self.dicom_df is None or len(self.dicom_df) == 0:
+            return
+
+        # Create worklist from current dataframe
+        worklist = []
+        for _, row in self.dicom_df.iterrows():
+            worklist.append({
+                'patientID': row['PatientUID'],
+                'studyInstanceUID': row['StudyUID'],
+                'seriesInstanceUID': row['SeriesUID'],
+                'instanceUID': row['InstanceUID'],
+                'inputPath': row['InputPath']  # Fallback for direct file loading
+            })
+
+        # Initialize preloader
+        self.preloader = LocalDICOMNextPreloader(maxCache=3)
+        self.preloader.setWorklist(worklist)
+
+        # Connect signal for when nodes are ready
+        self.preloader.nodeReady.connect(self._on_preloader_node_ready)
+
+    def _on_preloader_node_ready(self, index: int, node):
+        """Called when preloader has a node ready."""
+        logging.info(f"Preloaded DICOM at index {index}: {node.GetName()}")
 
     def get_transducer_model(self, transducerType: str) -> str:
         """
@@ -146,34 +333,71 @@ class DicomFileManager:
         finally:
             progress_dialog.close()
 
+
     def load_sequence(self, parameter_node, output_directory: Optional[str] = None,
                      continue_progress: bool = False, preserve_directory_structure: bool = True):
         """
-        Load next DICOM sequence from the dataframe.
+        Load next DICOM sequence from the dataframe with optional preloading.
 
-        This method loads the next DICOM file in the sequence, creates a temporary directory,
-        copies the DICOM file there, and loads it using Slicer's DICOM utilities. It then
-        finds the sequence browser node and updates the parameter node.
-
-        Args:
-            parameter_node: Parameter node to store the loaded sequence browser
-            output_directory: Optional output directory to check for existing files
-            continue_progress: If True, skip files that already exist in output directory
-            preserve_directory_structure: If True, the output filepath will be the same as the relative path.
-        Returns:
-            tuple: (current_dicom_df_index, sequence_browser) where:
-                - current_dicom_df_index: The index of the current DICOM file in the dataframe
-                - sequence_browser: The loaded sequence browser node
-                Returns (None, None) if no more sequences available or loading fails.
+        If preloading is enabled, this method will use the LocalDICOMNextPreloader
+        to load sequences faster and prefetch the next sequence in the background.
         """
         if self.dicom_df is None or self.next_dicom_index is None or self.next_dicom_index >= len(self.dicom_df):
             return None, None
 
+        # Use preloader if enabled and available
+        if self._preloader_enabled and self.preloader:
+            return self._load_sequence_with_preloader(parameter_node, output_directory,
+                                                    continue_progress, preserve_directory_structure)
+        else:
+            return self._load_sequence_traditional(parameter_node, output_directory,
+                                                 continue_progress, preserve_directory_structure)
+
+    def _load_sequence_with_preloader(self, parameter_node, output_directory: Optional[str] = None,
+                                    continue_progress: bool = False, preserve_directory_structure: bool = True):
+        """Load sequence using the preloader for improved performance."""
+        # Sync preloader index with our current index
+        if self.preloader.currentIndex != self.next_dicom_index - 1:
+            # Jump to correct position if indices are out of sync
+            self.preloader.currentIndex = self.next_dicom_index - 1
+
+        # Request next from preloader - this should be fast if already cached
+        self.preloader.onNextRequested()
+
+        # Get the node that should now be showing
+        current_index = self.preloader.currentIndex
+        node = self.preloader.cache.get(current_index)
+
+        if node:
+            # Find sequence browser from the loaded node
+            sequence_browser = self._find_sequence_browser_from_node(node)
+            if sequence_browser:
+                parameter_node.ultrasoundSequenceBrowser = sequence_browser
+
+                # Update our indices
+                self.current_dicom_index = current_index
+                self._increment_dicom_index(output_directory, continue_progress, preserve_directory_structure)
+
+                return self.current_dicom_index, sequence_browser
+
+        # Fallback to traditional loading if preloader fails
+        logging.warning("Preloader failed, falling back to traditional loading")
+        return self._load_sequence_traditional(parameter_node, output_directory,
+                                             continue_progress, preserve_directory_structure)
+
+    def _load_sequence_traditional(self, parameter_node, output_directory: Optional[str] = None,
+                                 continue_progress: bool = False, preserve_directory_structure: bool = True):
+        """Traditional DICOM loading method (existing implementation)."""
         next_row = self.dicom_df.iloc[self.next_dicom_index]
         temp_dicom_dir = self._setup_temp_directory()
 
         # Copy DICOM file to temporary folder
         shutil.copy(next_row['InputPath'], temp_dicom_dir)
+
+        # Copy next file too if available (for multi-frame loading)
+        if self.next_dicom_index + 1 < len(self.dicom_df):
+            next_next_row = self.dicom_df.iloc[self.next_dicom_index + 1]
+            shutil.copy(next_next_row['InputPath'], temp_dicom_dir)
 
         # Load DICOM using Slicer's DICOM utilities
         loaded_node_ids = self._load_dicom_from_temp(temp_dicom_dir)
@@ -353,7 +577,7 @@ class DicomFileManager:
         return f"{patientId}_{instanceId}.dcm"
 
     def _create_dataframe(self, dicom_data: List[dict]) -> None:
-        """Create pandas DataFrame from DICOM data"""
+        """Create pandas DataFrame from DICOM data and setup preloader if enabled."""
         if not dicom_data:
             self.dicom_df = pd.DataFrame()
             return
@@ -378,6 +602,10 @@ class DicomFileManager:
                                        .transform(lambda x: x.ffill().bfill()))
 
         self.next_dicom_index = 0
+
+        # Setup preloader if enabled
+        # if self._preloader_enabled:
+        #     self._setup_preloader()
 
     def update_progress_from_output(self, output_directory: str, preserve_directory_structure: bool) -> Optional[int]:
         """Update progress based on existing output files
@@ -467,6 +695,21 @@ class DicomFileManager:
             node = slicer.mrmlScene.GetNodeByID(node_id)
             if node and node.IsA("vtkMRMLSequenceBrowserNode"):
                 return node
+        return None
+
+    def _find_sequence_browser_from_node(self, node):
+        """Find sequence browser node from a loaded MRML node."""
+        # If the node itself is a sequence browser, return it
+        if node and node.IsA("vtkMRMLSequenceBrowserNode"):
+            return node
+
+        # Look for sequence browsers in the scene that might be associated
+        sequence_browsers = slicer.util.getNodesByClass("vtkMRMLSequenceBrowserNode")
+        for browser in sequence_browsers:
+            # Check if this browser controls our node
+            if browser.GetProxyNode(browser.GetMasterSequenceNode()) == node:
+                return browser
+
         return None
 
     def _get_file_for_instance_uid(self, instance_uid: str) -> Optional[str]:

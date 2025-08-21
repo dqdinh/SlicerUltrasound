@@ -1019,12 +1019,15 @@ class AnonymizeUltrasoundLogic(ScriptedLoadableModuleLogic, VTKObservationMixin)
         VTKObservationMixin.__init__(self)
 
         self.dicom_file_manager = DicomFileManager()
+        self.dicom_file_manager.enable_preloading(True)
+
         self.showAutoOverlay = False
         self._autoMaskRGB = None     # 1×H×W×3  uint8, red
         self._manualMaskRGB = None   # 1×H×W×3  uint8, green
         self._parameterNode = self._getOrCreateParameterNode()
         self.transducerMaskCache = {}   # TransducerModel -> mask volume node
         self.currentTransducerModel = 'unknown'
+
 
     def _getOrCreateParameterNode(self):
         if not hasattr(self, "_parameterNode"):
