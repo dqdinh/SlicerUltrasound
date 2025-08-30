@@ -306,6 +306,21 @@ class AnonymizeUltrasoundWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
         self.connectKeyboardShortcuts()
 
+        # Set up DICOM files table (3 columns: #, Filename, Anonymized)
+        if hasattr(self.ui, "dicomFilesTableWidget"):
+            table = self.ui.dicomFilesTableWidget
+            table.setColumnCount(3)
+            table.setHorizontalHeaderLabels(["#", "Filename", "Anonymized"])
+            try:
+                # Stretch last column if available
+                table.horizontalHeader().setStretchLastSection(True)
+            except Exception:
+                pass
+            # Load-by-double-click
+            table.cellDoubleClicked.connect(self._on_dicom_table_row_activated)
+        if hasattr(self.ui, "refreshDicomTableButton"):
+            self.ui.refreshDicomTableButton.clicked.connect(self.populate_dicom_table)
+
     def cleanup(self) -> None:
         """Called when the application closes and the module widget is destroyed."""
         self.removeObservers()
@@ -605,6 +620,8 @@ class AnonymizeUltrasoundWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
         # Set the patient name prefix to the input directory name
         self.ui.namePrefixLineEdit.text = inputDirectory.split('/')[-1]
+
+        self.populate_dicom_table()
 
     def set_processing_mode(self, mode: bool):
         self.processing_mode = mode
@@ -948,6 +965,9 @@ class AnonymizeUltrasoundWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
 
         self.ui.statusLabel.text = statusText
 
+        # Update DICOM table to reflect new anonymized state
+        self.populate_dicom_table()
+
         # Close the modal dialog
         dialog.close()
 
@@ -997,6 +1017,109 @@ class AnonymizeUltrasoundWidget(ScriptedLoadableModuleWidget, VTKObservationMixi
         """Helper slot to export the current scan and immediately load the next one (shortcut 'A')."""
         if self.onExportScanButton():
             self.onNextButton()
+
+    def populate_dicom_table(self):
+        if not hasattr(self.ui, "dicomFilesTableWidget"):
+            return
+        table = self.ui.dicomFilesTableWidget
+        df = self.logic.dicom_file_manager.dicom_df
+        table.setRowCount(0)
+        if df is None or len(df) == 0:
+            return
+
+        out_dir = self.ui.outputDirectoryButton.directory or ""
+        preserve_dirs = self.ui.preserveDirectoryStructureCheckBox.checked
+
+        table.setSortingEnabled(False)
+        table.setRowCount(len(df))
+        for idx in range(len(df)):
+            row = df.iloc[idx]
+            input_path = row.InputPath
+            basename = os.path.basename(input_path) if input_path else "Unknown"
+
+            # Determine anonymized state from presence of expected output file
+            try:
+                final_output_path = self.logic.dicom_file_manager.generate_output_filepath(
+                    out_dir, row.OutputPath, preserve_dirs
+                )
+            except Exception:
+                final_output_path = ""
+
+            is_anon = bool(final_output_path and os.path.exists(final_output_path))
+
+            # Col 0: row number (store actual df position in UserRole for reliable selection)
+            num_item = qt.QTableWidgetItem(str(idx + 1))
+            num_item.setData(qt.Qt.UserRole, idx)
+            num_item.setTextAlignment(qt.Qt.AlignCenter)
+
+            # Col 1: filename (tooltip = full path)
+            name_item = qt.QTableWidgetItem(basename)
+            if input_path:
+                name_item.setToolTip(input_path)
+
+            # Col 2: anonymized
+            anon_item = qt.QTableWidgetItem("Yes" if is_anon else "No")
+            anon_item.setTextAlignment(qt.Qt.AlignCenter)
+
+            table.setItem(idx, 0, num_item)
+            table.setItem(idx, 1, name_item)
+            table.setItem(idx, 2, anon_item)
+
+        table.setSortingEnabled(True)
+
+    def _on_dicom_table_row_activated(self, row, column):
+        # Load the specific DICOM at the clicked row using loadNextSequence
+        try:
+            if not hasattr(self.ui, "dicomFilesTableWidget"):
+                return
+            table = self.ui.dicomFilesTableWidget
+            idx_item = table.item(row, 0)
+            if idx_item is None:
+                return
+            df_pos = idx_item.data(qt.Qt.UserRole)
+            if df_pos is None:
+                df_pos = row
+
+            # Position the "next row" pointer and load it
+            self.logic.dicom_file_manager.next_dicom_index = int(df_pos)
+
+            preserve_dirs = self.ui.preserveDirectoryStructureCheckBox.checked
+            continue_progress = self.ui.continueProgressCheckBox.checked
+            output_dir = self.ui.outputDirectoryButton.directory
+
+            currentDicomDfIndex = self.logic.loadNextSequence(
+                outputDirectory=output_dir,
+                continueProgress=continue_progress,
+                preserve_directory_structure=preserve_dirs
+            )
+            # Update UI like onNextButton
+            if currentDicomDfIndex is None or self.logic.dicom_file_manager.dicom_df is None:
+                self.ui.statusLabel.text = "No DICOM file loaded"
+                return
+
+            self.ui.progressBar.value = currentDicomDfIndex + 1
+            current_dicom_record = self.logic.dicom_file_manager.dicom_df.iloc[currentDicomDfIndex]
+            patientID = getattr(current_dicom_record.DICOMDataset, "PatientID", "") or "N/A"
+            self.ui.patientIdLabel.text = patientID if patientID else "None"
+
+            instanceUID = getattr(current_dicom_record.DICOMDataset, "SOPInstanceUID", "") or "N/A"
+            self.ui.sopInstanceUidLabel.text = instanceUID if instanceUID else "None"
+
+            filepath = current_dicom_record['InputPath']
+            self.ui.statusLabel.text = f"Instance {instanceUID} loaded from file:\n{filepath}"
+
+            threePointFanModeEnabled = self.ui.threePointFanCheckBox.checked
+            self.logic.updateMaskVolume(three_point=threePointFanModeEnabled)
+            self.logic.showMaskContour()
+
+            sliceCompositeNode = slicer.app.layoutManager().sliceWidget("Red").mrmlSliceCompositeNode()
+            sliceCompositeNode.SetCompositing(2)
+
+            slicer.util.mainWindow().activateWindow()
+            slicer.util.mainWindow().raise_()
+            slicer.util.mainWindow().setFocus()
+        except Exception as e:
+            logging.error(f"Failed to load row {row}: {e}")
 
 #
 # AnonymizeUltrasoundLogic

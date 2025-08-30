@@ -286,6 +286,46 @@
     </widget>
    </item>
    <item>
+     <widget class="ctkCollapsibleButton" name="dicomFilesCollapsibleButton">
+      <property name="text">
+       <string>DICOM files</string>
+      </property>
+      <layout class="QVBoxLayout" name="dicomFilesLayout">
+       <item>
+        <widget class="QTableWidget" name="dicomFilesTableWidget">
+         <property name="sortingEnabled">
+          <bool>true</bool>
+         </property>
+         <property name="selectionBehavior">
+          <enum>QAbstractItemView::SelectRows</enum>
+         </property>
+         <property name="editTriggers">
+          <set>QAbstractItemView::NoEditTriggers</set>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <layout class="QHBoxLayout" name="dicomFilesButtonsLayout">
+         <item>
+          <widget class="QPushButton" name="refreshDicomTableButton">
+           <property name="text">
+            <string>Update table</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="dicomFilesButtonsSpacer">
+           <property name="orientation">
+            <enum>Qt::Horizontal</enum>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </item>
+      </layout>
+     </widget>
+    </item>
+   <item>
     <widget class="ctkCollapsibleButton" name="settingsCollapsibleButton">
      <property name="text">
       <string>Settings</string>
