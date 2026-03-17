@@ -16,8 +16,13 @@ export function writeAnonymizedDicom(
   deidentified: DeidentifiedFields,
   modifiedPixelData?: ArrayBuffer
 ): ArrayBuffer {
-  // Clone the source dataset so we don't mutate it
-  const dataset = { ...source.dataset };
+  // Clone the source dataset so we don't mutate it.
+  // Use shallow spread since we only reassign top-level properties.
+  // Nested objects from dcmjs cannot be structuredClone'd.
+  const dataset: Record<string, any> = { ...source.dataset };
+
+  // Strip private DICOM tags (odd-group tags that may contain vendor-specific PII)
+  stripPrivateTags(dataset);
 
   // Apply de-identification
   dataset.PatientName = deidentified.PatientName;
@@ -59,4 +64,26 @@ export function writeAnonymizedDicom(
 
   // Write to ArrayBuffer
   return newDicomDict.write();
+}
+
+/**
+ * Remove private DICOM tags from a naturalized dataset.
+ *
+ * In the dcmjs naturalized format, private tags appear as keys like
+ * "00091001" or similar numeric-looking strings (group is odd).
+ * We also remove known vendor-specific keyword patterns.
+ */
+function stripPrivateTags(dataset: Record<string, any>): void {
+  // Private tags in naturalized dcmjs datasets appear as hex-like keys
+  // where the group number (first 4 hex digits) is odd
+  const privateTagPattern = /^[0-9a-fA-F]{8}$/;
+
+  for (const key of Object.keys(dataset)) {
+    if (privateTagPattern.test(key)) {
+      const group = parseInt(key.substring(0, 4), 16);
+      if (group % 2 === 1) {
+        delete dataset[key];
+      }
+    }
+  }
 }

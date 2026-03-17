@@ -5,3 +5,16 @@ dist/
 *.d.ts
 !jest.config.ts
 !src/**/*.d.ts
+
+# Environment and secrets
+.env
+.env.*
+
+# OS artifacts
+.DS_Store
+
+# Test output
+coverage/
+
+# Logs
+*.log

@@ -5,9 +5,21 @@ import * as path from 'path';
 import { anonymizeDicom } from '../src/anonymizer';
 import { loadConfig, mergeWithDefaults } from '../src/config-loader';
 import { keysRecordsToCsv } from '../src/header-exporter';
-import { AnonymizeConfig, AnonymizeInput, AnonymizeResult, KeysRecord, DICOM_EXTENSIONS } from '../src/types';
+import { AnonymizeConfig, AnonymizeInput, AnonymizeResult, KeysRecord, DICOM_EXTENSIONS, SkippedError } from '../src/types';
 
 const program = new Command();
+
+/**
+ * Validate that a resolved path stays within the expected base directory.
+ * Prevents path traversal attacks via symlinks or ".." components.
+ */
+function assertPathWithin(filePath: string, baseDir: string): void {
+  const resolved = path.resolve(filePath);
+  const resolvedBase = path.resolve(baseDir) + path.sep;
+  if (!resolved.startsWith(resolvedBase) && resolved !== path.resolve(baseDir)) {
+    throw new Error(`Path traversal detected: ${filePath} escapes ${baseDir}`);
+  }
+}
 
 program
   .name('anonymize-ultrasound')
@@ -91,6 +103,7 @@ program
         } else {
           outputPath = path.join(outputDir, result.anonFilename);
         }
+        assertPathWithin(outputPath, outputDir);
 
         // Check if file exists and skip if not overwriting
         if (fs.existsSync(outputPath) && !opts.overwrite) {
@@ -112,6 +125,7 @@ program
         } else {
           headerPath = path.join(headersDir, headerFilename);
         }
+        assertPathWithin(headerPath, headersDir);
         fs.mkdirSync(path.dirname(headerPath), { recursive: true });
         fs.writeFileSync(headerPath, JSON.stringify(result.headerJson, null, 2));
 
@@ -125,7 +139,7 @@ program
         console.log(`  -> ${result.anonFilename}`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        if (message.includes('skipped')) {
+        if (err instanceof SkippedError) {
           skipped++;
           console.log(`  Skipped: ${message}`);
         } else {

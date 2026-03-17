@@ -1,4 +1,4 @@
-import { AnonymizeInput, AnonymizeResult, AnonymizeConfig, DEFAULT_CONFIG } from './types';
+import { AnonymizeInput, AnonymizeResult, AnonymizeConfig, DEFAULT_CONFIG, SkippedError } from './types';
 import { readDicom, isUltrasound } from './dicom-reader';
 import { deidentifyMetadata } from './deidentifier';
 import { generateAnonFilename } from './filename-generator';
@@ -32,7 +32,7 @@ export function anonymizeDicom(
 
   // 3. Skip single frame if configured
   if (config.skipSingleFrame && parsed.metadata.NumberOfFrames < 2) {
-    throw new Error('Single-frame DICOM file skipped (skipSingleFrame=true)');
+    throw new SkippedError('Single-frame DICOM file skipped (skipSingleFrame=true)');
   }
 
   // 4. Generate anonymized filename
@@ -54,7 +54,7 @@ export function anonymizeDicom(
   );
 
   // 6. Resolve top_ratio based on manufacturer config
-  const topRatio = resolveTopRatio(parsed.metadata as unknown as Record<string, unknown>, config);
+  const topRatio = resolveTopRatio(parsed.metadata, config);
 
   // 7. Apply pixel redaction if top_ratio > 0
   let modifiedPixelData: ArrayBuffer | undefined;

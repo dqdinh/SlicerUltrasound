@@ -118,6 +118,8 @@ export interface PixelDimensions {
   height: number;
   width: number;
   channels: number;
+  /** Bits allocated per sample (default: 8). Used to compute bytes per pixel. */
+  bitsAllocated: number;
 }
 
 /**
@@ -130,6 +132,16 @@ export const DEFAULT_CONFIG: AnonymizeConfig = {
   skipSingleFrame: false,
   preserveDirectoryStructure: true,
 };
+
+/**
+ * Error thrown when a DICOM file is intentionally skipped (not a failure).
+ */
+export class SkippedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SkippedError';
+  }
+}
 
 /** Allowed DICOM file extensions (lowercase) */
 export const DICOM_EXTENSIONS = new Set(['.dcm', '.dicom']);

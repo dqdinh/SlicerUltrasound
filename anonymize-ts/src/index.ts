@@ -11,7 +11,7 @@ export type {
   DicomMetadata,
   PixelDimensions,
 } from './types';
-export { DEFAULT_CONFIG, DICOM_EXTENSIONS } from './types';
+export { DEFAULT_CONFIG, DICOM_EXTENSIONS, SkippedError } from './types';
 
 // Config
 export { loadConfig, mergeWithDefaults, resolveTopRatio } from './config-loader';

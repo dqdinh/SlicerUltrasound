@@ -80,7 +80,11 @@ export function keysRecordsToCsv(records: KeysRecord[]): string {
       if (val === null || val === undefined) {
         return '';
       }
-      const str = String(val);
+      let str = String(val);
+      // Prevent CSV formula injection in spreadsheet applications
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = "'" + str;
+      }
       // Escape fields containing commas or quotes
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return `"${str.replace(/"/g, '""')}"`;

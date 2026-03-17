@@ -7,10 +7,12 @@ describe('applyTopRedaction', () => {
     height: 100,
     width: 50,
     channels: 3,
+    bitsAllocated: 8,
   };
 
   function createTestBuffer(dims: PixelDimensions, fillValue: number = 255): ArrayBuffer {
-    const size = dims.numFrames * dims.height * dims.width * dims.channels;
+    const bytesPerSample = Math.ceil((dims.bitsAllocated || 8) / 8);
+    const size = dims.numFrames * dims.height * dims.width * dims.channels * bytesPerSample;
     const buffer = new ArrayBuffer(size);
     new Uint8Array(buffer).fill(fillValue);
     return buffer;
@@ -48,7 +50,7 @@ describe('applyTopRedaction', () => {
   });
 
   it('works with multi-frame data', () => {
-    const multiDims: PixelDimensions = { numFrames: 3, height: 100, width: 50, channels: 3 };
+    const multiDims: PixelDimensions = { numFrames: 3, height: 100, width: 50, channels: 3, bitsAllocated: 8 };
     const buffer = createTestBuffer(multiDims);
     const result = applyTopRedaction(buffer, multiDims, 0.2);
     const resultView = new Uint8Array(result);
@@ -79,7 +81,7 @@ describe('applyTopRedaction', () => {
   });
 
   it('handles grayscale (1 channel)', () => {
-    const grayDims: PixelDimensions = { numFrames: 1, height: 100, width: 50, channels: 1 };
+    const grayDims: PixelDimensions = { numFrames: 1, height: 100, width: 50, channels: 1, bitsAllocated: 8 };
     const buffer = createTestBuffer(grayDims);
     const result = applyTopRedaction(buffer, grayDims, 0.1);
     const resultView = new Uint8Array(result);
@@ -96,7 +98,7 @@ describe('applyTopRedaction', () => {
 
 describe('applyTopRedactionInPlace', () => {
   it('modifies the buffer in place', () => {
-    const dims: PixelDimensions = { numFrames: 1, height: 10, width: 5, channels: 1 };
+    const dims: PixelDimensions = { numFrames: 1, height: 10, width: 5, channels: 1, bitsAllocated: 8 };
     const data = new Uint8Array(50).fill(128);
     applyTopRedactionInPlace(data, dims, 0.5);
 

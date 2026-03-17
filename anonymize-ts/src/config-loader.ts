@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { AnonymizeConfig, TopRatioRule, DEFAULT_CONFIG } from './types';
+import { AnonymizeConfig, TopRatioRule, DEFAULT_CONFIG, DicomMetadata } from './types';
 
 /**
  * Load an AnonymizeConfig from a JSON file path.
@@ -8,7 +8,9 @@ import { AnonymizeConfig, TopRatioRule, DEFAULT_CONFIG } from './types';
 export function loadConfig(filePath: string): AnonymizeConfig {
   const raw = fs.readFileSync(filePath, 'utf-8');
   const parsed = JSON.parse(raw);
-  return mergeWithDefaults(parsed);
+  const config = mergeWithDefaults(parsed);
+  validateConfig(config);
+  return config;
 }
 
 /**
@@ -34,7 +36,7 @@ export function mergeWithDefaults(partial: Partial<AnonymizeConfig>): AnonymizeC
  * If no rule matches, the `defaultTopRatio` is returned.
  */
 export function resolveTopRatio(
-  metadata: Record<string, unknown>,
+  metadata: DicomMetadata | Record<string, unknown>,
   config: AnonymizeConfig
 ): number {
   for (const rule of config.rules) {
@@ -45,9 +47,36 @@ export function resolveTopRatio(
   return config.defaultTopRatio;
 }
 
-function ruleMatches(rule: TopRatioRule, metadata: Record<string, unknown>): boolean {
+/**
+ * Validate an AnonymizeConfig for type correctness and value ranges.
+ */
+export function validateConfig(config: AnonymizeConfig): void {
+  if (typeof config.defaultTopRatio !== 'number' || !Number.isFinite(config.defaultTopRatio)) {
+    throw new Error(`Invalid defaultTopRatio: ${config.defaultTopRatio} (must be a finite number)`);
+  }
+  if (config.defaultTopRatio < 0 || config.defaultTopRatio > 1) {
+    throw new Error(`defaultTopRatio out of range: ${config.defaultTopRatio} (must be 0-1)`);
+  }
+  if (!Array.isArray(config.rules)) {
+    throw new Error('rules must be an array');
+  }
+  for (let i = 0; i < config.rules.length; i++) {
+    const rule = config.rules[i];
+    if (typeof rule.topRatio !== 'number' || !Number.isFinite(rule.topRatio)) {
+      throw new Error(`Invalid topRatio in rule[${i}]: ${rule.topRatio}`);
+    }
+    if (rule.topRatio < 0 || rule.topRatio > 1) {
+      throw new Error(`topRatio out of range in rule[${i}]: ${rule.topRatio} (must be 0-1)`);
+    }
+    if (typeof rule.match !== 'object' || rule.match === null || Array.isArray(rule.match)) {
+      throw new Error(`Invalid match in rule[${i}]: must be an object`);
+    }
+  }
+}
+
+function ruleMatches(rule: TopRatioRule, metadata: DicomMetadata | Record<string, unknown>): boolean {
   for (const [tagKey, pattern] of Object.entries(rule.match)) {
-    const tagValue = metadata[tagKey];
+    const tagValue = (metadata as Record<string, unknown>)[tagKey];
     if (tagValue === undefined || tagValue === null) {
       return false;
     }

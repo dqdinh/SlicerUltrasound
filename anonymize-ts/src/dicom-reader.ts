@@ -71,14 +71,14 @@ function extractMetadata(dataset: Record<string, any>): DicomMetadata {
     ReferringPhysicianName:
       dataset.ReferringPhysicianName?.Alphabetic || dataset.ReferringPhysicianName || '',
     AccessionNumber: dataset.AccessionNumber || '',
-    NumberOfFrames: parseInt(dataset.NumberOfFrames, 10) || 1,
-    Rows: dataset.Rows || 0,
-    Columns: dataset.Columns || 0,
-    SamplesPerPixel: dataset.SamplesPerPixel || 1,
-    BitsAllocated: dataset.BitsAllocated || 8,
-    BitsStored: dataset.BitsStored || 8,
-    HighBit: dataset.HighBit || 7,
-    PixelRepresentation: dataset.PixelRepresentation || 0,
+    NumberOfFrames: safeParseInt(dataset.NumberOfFrames, 1),
+    Rows: dataset.Rows ?? 0,
+    Columns: dataset.Columns ?? 0,
+    SamplesPerPixel: dataset.SamplesPerPixel ?? 1,
+    BitsAllocated: dataset.BitsAllocated ?? 8,
+    BitsStored: dataset.BitsStored ?? 8,
+    HighBit: dataset.HighBit ?? 7,
+    PixelRepresentation: dataset.PixelRepresentation ?? 0,
     PhotometricInterpretation: dataset.PhotometricInterpretation || 'MONOCHROME2',
     PlanarConfiguration: dataset.PlanarConfiguration || 0,
     PatientAge: dataset.PatientAge || '',
@@ -95,6 +95,18 @@ function extractMetadata(dataset: Record<string, any>): DicomMetadata {
 }
 
 /**
+ * Safely parse an integer value, returning a default if parsing fails or produces NaN.
+ */
+function safeParseInt(value: unknown, defaultValue: number): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : defaultValue;
+  if (typeof value === 'string') {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+  }
+  return defaultValue;
+}
+
+/**
  * Extract physical spacing from SequenceOfUltrasoundRegions.
  */
 function extractSpacingInfo(dataset: Record<string, any>): {
@@ -108,10 +120,12 @@ function extractSpacingInfo(dataset: Record<string, any>): {
   if (Array.isArray(regions) && regions.length > 0) {
     const region = regions[0];
     if (region.PhysicalDeltaX !== undefined) {
-      deltaX = parseFloat(region.PhysicalDeltaX);
+      const parsed = parseFloat(region.PhysicalDeltaX);
+      deltaX = Number.isFinite(parsed) ? parsed : null;
     }
     if (region.PhysicalDeltaY !== undefined) {
-      deltaY = parseFloat(region.PhysicalDeltaY);
+      const parsed = parseFloat(region.PhysicalDeltaY);
+      deltaY = Number.isFinite(parsed) ? parsed : null;
     }
   }
 
@@ -127,6 +141,7 @@ function extractDimensions(metadata: DicomMetadata): PixelDimensions {
     height: metadata.Rows,
     width: metadata.Columns,
     channels: metadata.SamplesPerPixel,
+    bitsAllocated: metadata.BitsAllocated,
   };
 }
 

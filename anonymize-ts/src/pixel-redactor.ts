@@ -21,7 +21,7 @@ export function applyTopRedaction(
     return pixelData;
   }
 
-  const { numFrames, height, width, channels } = dimensions;
+  const { numFrames, height, width, channels, bitsAllocated = 8 } = dimensions;
   const redactionHeight = Math.floor(height * topRatio);
 
   if (redactionHeight <= 0) {
@@ -30,7 +30,8 @@ export function applyTopRedaction(
 
   // Work on a copy
   const result = new Uint8Array(pixelData.slice(0));
-  const bytesPerPixel = channels;
+  const bytesPerSample = Math.ceil(bitsAllocated / 8);
+  const bytesPerPixel = channels * bytesPerSample;
   const bytesPerRow = width * bytesPerPixel;
   const bytesPerFrame = height * bytesPerRow;
 
@@ -57,14 +58,15 @@ export function applyTopRedactionInPlace(
     return;
   }
 
-  const { numFrames, height, width, channels } = dimensions;
+  const { numFrames, height, width, channels, bitsAllocated = 8 } = dimensions;
   const redactionHeight = Math.floor(height * topRatio);
 
   if (redactionHeight <= 0) {
     return;
   }
 
-  const bytesPerPixel = channels;
+  const bytesPerSample = Math.ceil(bitsAllocated / 8);
+  const bytesPerPixel = channels * bytesPerSample;
   const bytesPerRow = width * bytesPerPixel;
   const bytesPerFrame = height * bytesPerRow;
 
