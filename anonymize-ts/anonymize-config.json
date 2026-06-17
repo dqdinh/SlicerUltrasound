@@ -1,0 +1,12 @@
+{
+  "defaultTopRatio": 0,
+  "hashPatientId": true,
+  "skipSingleFrame": false,
+  "preserveDirectoryStructure": true,
+  "rules": [
+    {
+      "match": { "Manufacturer": "mindray" },
+      "topRatio": 0.1
+    }
+  ]
+}
